@@ -313,30 +313,65 @@ class Canvas:
                     self.px[o + 2] = (a * b + (255 - a) * self.px[o + 2]) // 255
 
     def paste_scaled(self, src, dx, dy, dw, dh):
-        """Nearest-neighbour scale of an RGBA canvas onto this RGB canvas."""
+        """Bilinear scale of an RGBA canvas onto this RGB canvas.
+
+        Source samples are interpolated in premultiplied form (colour
+        weighted by alpha) so transparent pixels cannot bleed black into
+        the edges, then composited over the destination by the result
+        alpha. This replaces the old nearest-neighbour sampling, whose
+        hard stair-step edges showed on the scaled-down house art.
+        """
+        sw, sh = src.w, src.h
         for j in range(dh):
-            sy = min(src.h - 1, j * src.h // dh)
             yy = dy + j
             if yy < 0 or yy >= self.h:
                 continue
+            syf = (j + 0.5) * sh / dh - 0.5
+            syf = min(max(syf, 0.0), sh - 1.0)
+            y0 = int(syf)
+            y1 = min(y0 + 1, sh - 1)
+            fy = syf - y0
             for i in range(dw):
-                sx = min(src.w - 1, i * src.w // dw)
-                si = (sy * src.w + sx) * 4
-                a = src.px[si + 3]
-                if a == 0:
-                    continue
                 xx = dx + i
                 if xx < 0 or xx >= self.w:
                     continue
+                sxf = (i + 0.5) * sw / dw - 0.5
+                sxf = min(max(sxf, 0.0), sw - 1.0)
+                x0 = int(sxf)
+                x1 = min(x0 + 1, sw - 1)
+                fx = sxf - x0
+                w00 = (1 - fx) * (1 - fy)
+                w10 = fx * (1 - fy)
+                w01 = (1 - fx) * fy
+                w11 = fx * fy
+                ra = ga = ba = aa = 0.0
+                for (px, py, w) in ((x0, y0, w00), (x1, y0, w10),
+                                    (x0, y1, w01), (x1, y1, w11)):
+                    if w == 0:
+                        continue
+                    si = (py * sw + px) * 4
+                    a = src.px[si + 3]
+                    if a == 0:
+                        continue
+                    ra += src.px[si] * a * w
+                    ga += src.px[si + 1] * a * w
+                    ba += src.px[si + 2] * a * w
+                    aa += a * w
+                if aa <= 0:
+                    continue
+                a = int(round(aa))
+                r = int(round(ra / aa))
+                g = int(round(ga / aa))
+                b = int(round(ba / aa))
                 o = (yy * self.w + xx) * 3
                 if a == 255:
-                    self.px[o] = src.px[si]
-                    self.px[o + 1] = src.px[si + 1]
-                    self.px[o + 2] = src.px[si + 2]
+                    self.px[o] = r
+                    self.px[o + 1] = g
+                    self.px[o + 2] = b
                 else:
-                    self.px[o] = (a * src.px[si] + (255 - a) * self.px[o]) // 255
-                    self.px[o + 1] = (a * src.px[si + 1] + (255 - a) * self.px[o + 1]) // 255
-                    self.px[o + 2] = (a * src.px[si + 2] + (255 - a) * self.px[o + 2]) // 255
+                    self.px[o] = (a * r + (255 - a) * self.px[o]) // 255
+                    self.px[o + 1] = (a * g + (255 - a) * self.px[o + 1]) // 255
+                    self.px[o + 2] = (a * b + (255 - a) * self.px[o + 2]) // 255
 
 
 def _c4(rgb):
